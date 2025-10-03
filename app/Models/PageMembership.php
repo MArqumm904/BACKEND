@@ -22,6 +22,7 @@ class PageMembership extends Model
         'currently_working',
         'responsibilities',
         'status',
+        'is_member'
     ];
 
     protected $casts = [

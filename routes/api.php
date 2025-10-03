@@ -162,6 +162,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/removemember', [App\Http\Controllers\UserMembershipController::class, 'RemoveMember']);
     Route::post('/cancelmembership', [App\Http\Controllers\UserMembershipController::class, 'cancelmembership']);
     Route::post('/membershipstatususerside', [App\Http\Controllers\UserMembershipController::class, 'membershipstatususerside']);
+    Route::post('/getCompanyInvitations', [App\Http\Controllers\UserMembershipController::class, 'getCompanyInvitations']);
+    Route::post('/approvedCompanyInvitations', [App\Http\Controllers\UserMembershipController::class, 'approvedCompanyInvitations']);
+    Route::post('/rejectCompanyInvitations', [App\Http\Controllers\UserMembershipController::class, 'rejectCompanyInvitations']);
+    Route::post('/getCompanyAffiliations', [App\Http\Controllers\UserMembershipController::class, 'getCompanyAffiliations']);
+    Route::post('/getMembership/{id}', [App\Http\Controllers\UserMembershipController::class, 'getMembership']);
+    Route::post('/updateMembership/{id}', [App\Http\Controllers\UserMembershipController::class, 'updateMembership']);
 });
 
 

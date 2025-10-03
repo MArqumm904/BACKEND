@@ -12,7 +12,7 @@ use App\Models\MembershipDocument;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
-
+use Illuminate\Support\Facades\DB;
 class UserMembershipController extends Controller
 {
 
@@ -30,7 +30,7 @@ class UserMembershipController extends Controller
 
             $pendingMemberships = UserMembership::where('user_id', $user->id)
                 ->whereIn('status', ['pending', 'company_approved'])
-                ->with('page')
+                ->with(['page', 'documents'])
                 ->get();
 
             return response()->json([
@@ -42,6 +42,160 @@ class UserMembershipController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch pending memberships',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    public function getMembership($id)
+    {
+        try {
+            $membership = UserMembership::with(['documents', 'page'])
+                ->where('id', $id)
+                ->first();
+
+            if (!$membership) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Membership not found'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $membership
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch membership',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+   public function updateMembership(Request $request, $id)
+    {
+        DB::beginTransaction();
+        
+        try {
+            $validator = Validator::make($request->all(), [
+                'job_title' => 'required|string|max:255',
+                'location' => 'required|string|max:255',
+                'start_date' => 'required|date',
+                'end_date' => 'nullable|date|after:start_date',
+                'currently_working' => 'boolean',
+                'responsibilities' => 'required|string',
+                'confirmation_letter' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
+                'proof_document' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
+            ], [
+                'currently_working.boolean' => 'The currently working field must be true or false.',
+                'confirmation_letter.mimes' => 'Confirmation letter must be a PDF, JPG, PNG, DOC, or DOCX file.',
+                'proof_document.mimes' => 'Proof document must be a PDF, JPG, PNG, DOC, or DOCX file.',
+                'confirmation_letter.max' => 'Confirmation letter must not exceed 10MB.',
+                'proof_document.max' => 'Proof document must not exceed 10MB.',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $membership = UserMembership::where('id', $id)->first();
+
+            if (!$membership) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Membership not found'
+                ], 404);
+            }
+
+            $currentlyWorking = filter_var($request->currently_working, FILTER_VALIDATE_BOOLEAN);
+
+            $updateData = [
+                'job_title' => $request->job_title,
+                'location' => $request->location,
+                'start_date' => $request->start_date,
+                'currently_working' => $currentlyWorking,
+                'responsibilities' => $request->responsibilities,
+            ];
+
+            if (!$currentlyWorking && $request->end_date) {
+                $updateData['end_date'] = $request->end_date;
+            } else {
+                $updateData['end_date'] = null;
+            }
+
+            $membership->update($updateData);
+
+            if ($request->hasFile('confirmation_letter')) {
+                $confirmationLetter = $request->file('confirmation_letter');
+                $confirmationLetterPath = $confirmationLetter->store('membership_documents', 'public');
+                
+                $document = MembershipDocument::where('membership_id', $membership->id)->first();
+                if ($document) {
+                    if ($document->confirmation_letter && Storage::disk('public')->exists($document->confirmation_letter)) {
+                        Storage::disk('public')->delete($document->confirmation_letter);
+                    }
+                    
+                    $document->update(['confirmation_letter' => $confirmationLetterPath]);
+                } else {
+                    MembershipDocument::create([
+                        'membership_id' => $membership->id,
+                        'confirmation_letter' => $confirmationLetterPath,
+                        'proof_document' => null,
+                        'uploaded_by_company' => null,
+                        'status' => 'pending'
+                    ]);
+                }
+            }
+
+            if ($request->hasFile('proof_document')) {
+                $proofDocument = $request->file('proof_document');
+                $proofDocumentPath = $proofDocument->store('membership_documents', 'public');
+                
+                $document = MembershipDocument::where('membership_id', $membership->id)->first();
+                if ($document) {
+                    if ($document->proof_document && Storage::disk('public')->exists($document->proof_document)) {
+                        Storage::disk('public')->delete($document->proof_document);
+                    }
+                    
+                    $document->update(['proof_document' => $proofDocumentPath]);
+                } else {
+                    MembershipDocument::create([
+                        'membership_id' => $membership->id,
+                        'confirmation_letter' => null,
+                        'proof_document' => $proofDocumentPath,
+                        'uploaded_by_company' => null,
+                        'status' => 'pending'
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            $updatedMembership = UserMembership::with(['documents', 'page'])
+                ->where('id', $id)
+                ->first();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Membership updated successfully',
+                'data' => $updatedMembership
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update membership',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -178,19 +332,15 @@ class UserMembershipController extends Controller
 
         $pageId = $request->input('page_id');
 
-        // Get user memberships
         $userMemberships = UserMembership::where('page_id', $pageId)
             ->where('status', 'admin_verified')
             ->get();
 
-        // Get page memberships (company memberships)
         $pageMemberships = PageMembership::where('page_id', $pageId)
-            ->where('status', 'company_approved')
             ->get();
 
         $members = [];
 
-        // Process user memberships
         foreach ($userMemberships as $membership) {
             $user = User::find($membership->user_id);
 
@@ -214,39 +364,49 @@ class UserMembershipController extends Controller
         }
 
         foreach ($pageMemberships as $membership) {
-            $user = User::find($membership->user_page_id);
+            $pageExists = Page::where('id', $membership->user_page_id)->exists();
 
-            if ($user) {
-                $profile = Profile::where('user_id', $user->id)->first();
-
-                $members[] = [
-                    'membership_id' => $membership->id,
-                    'user_id' => $user->id,
-                    'name' => $user->name,
-                    'job_title' => $membership->job_title,
-                    'profile_photo' => $profile->profile_photo ?? null,
-                    'cover_photo' => $profile->cover_photo ?? null,
-                    'verified' => $profile->verified ?? false,
-                    'headline' => $profile->headline ?? null,
-                    'type' => 'user',
-                    'membership_type' => 'page_membership'
-                ];
+            if ($pageExists) {
+                if (
+                    $membership->status === 'admin_verified' &&
+                    $membership->page_id == $membership->is_member
+                ) {
+                    $page = Page::find($membership->user_page_id);
+                    if ($page) {
+                        $members[] = [
+                            'membership_id' => $membership->id,
+                            'user_id' => $page->id,
+                            'name' => $page->page_name,
+                            'job_title' => $membership->job_title,
+                            'profile_photo' => $page->page_profile_photo ?? null,
+                            'cover_photo' => $page->page_cover_photo ?? null,
+                            'verified' => false,
+                            'headline' => $page->page_description ?? null,
+                            'type' => 'page',
+                            'membership_type' => 'page_membership'
+                        ];
+                    }
+                }
             } else {
-                $page = Page::find($membership->user_page_id);
+                if ($membership->status === 'company_approved') {
+                    $user = User::find($membership->user_page_id);
 
-                if ($page) {
-                    $members[] = [
-                        'membership_id' => $membership->id,
-                        'user_id' => $page->id,
-                        'name' => $page->page_name,
-                        'job_title' => $membership->job_title,
-                        'profile_photo' => $page->page_profile_photo ?? null,
-                        'cover_photo' => $page->page_cover_photo ?? null,
-                        'verified' => false, // Pages don't have verified status like users
-                        'headline' => $page->page_description ?? null,
-                        'type' => 'page',
-                        'membership_type' => 'page_membership'
-                    ];
+                    if ($user) {
+                        $profile = Profile::where('user_id', $user->id)->first();
+
+                        $members[] = [
+                            'membership_id' => $membership->id,
+                            'user_id' => $user->id,
+                            'name' => $user->name,
+                            'job_title' => $membership->job_title,
+                            'profile_photo' => $profile->profile_photo ?? null,
+                            'cover_photo' => $profile->cover_photo ?? null,
+                            'verified' => $profile->verified ?? false,
+                            'headline' => $profile->headline ?? null,
+                            'type' => 'user',
+                            'membership_type' => 'page_membership'
+                        ];
+                    }
                 }
             }
         }
@@ -256,6 +416,26 @@ class UserMembershipController extends Controller
             'members' => $members
         ]);
     }
+
+    public function getCompanyAffiliations(Request $request)
+    {
+        $pageId = $request->input('page_id');
+
+        $memberships = PageMembership::where('user_page_id', $pageId)
+            ->whereColumn('page_id', 'is_member')
+            ->with([
+                'page:id,page_profile_photo',
+                'documents'
+            ])
+            ->get();
+
+        return response()->json([
+            'status' => true,
+            'data' => $memberships
+        ]);
+    }
+
+
     public function getCompanies(Request $request)
     {
 
@@ -293,10 +473,15 @@ class UserMembershipController extends Controller
             ->pluck('user_page_id')
             ->toArray();
 
+        $excludedUserIds = UserMembership::where('page_id', $pageId)
+            ->pluck('user_id')
+            ->toArray();
+
         $pages = Page::whereNotIn('id', $requestedPageUserIds)
             ->paginate($perPage, ['*'], 'page_page', $page);
 
         $users = User::whereNotIn('id', $requestedPageUserIds)
+            ->whereNotIn('id', $excludedUserIds)
             ->where('id', '!=', $userId)
             ->paginate($perPage, ['*'], 'user_page', $page);
 
@@ -319,6 +504,7 @@ class UserMembershipController extends Controller
 
         return response()->json($response);
     }
+
 
 
     public function requestMembership(Request $request)
@@ -414,6 +600,14 @@ class UserMembershipController extends Controller
             $companyId = $request->companyId;
             $userPageId = $request->user_page_id;
 
+            $pageExists = Page::where('id', $userPageId)->exists();
+
+            $isMember = null;
+
+            if ($pageExists) {
+                $isMember = $companyId;
+            }
+
             $membership = PageMembership::create([
                 'page_id' => $companyId,
                 'user_page_id' => $userPageId,
@@ -424,7 +618,8 @@ class UserMembershipController extends Controller
                 'end_date' => $request->currentlyWorking ? null : $request->endDate,
                 'currently_working' => $request->currentlyWorking ? 1 : 0,
                 'responsibilities' => $request->responsibilities,
-                'status' => 'pending'
+                'status' => 'pending',
+                'is_member' => $isMember,
             ]);
 
             $confirmationLetterPath = null;
@@ -441,7 +636,6 @@ class UserMembershipController extends Controller
                 $proofDocumentPath = $proofDocument->storeAs('membership_documents', $proofDocumentName, 'public');
             }
 
-            // 🔹 Step 3: Insert Documents + Auto Approve
             $membershipDocument = MembershipDocument::create([
                 'membership_id' => $membership->id,
                 'confirmation_letter' => $confirmationLetterPath,
@@ -451,12 +645,9 @@ class UserMembershipController extends Controller
                 'updated_at' => now()
             ]);
 
-            $membership->status = 'pending';
-            $membership->save();
-
             return response()->json([
                 'success' => true,
-                'message' => 'Membership request created, documents uploaded, and approved successfully',
+                'message' => 'Membership request created successfully',
                 'data' => [
                     'membership' => $membership,
                     'documents' => $membershipDocument
@@ -477,6 +668,119 @@ class UserMembershipController extends Controller
             ], 500);
         }
     }
+
+
+    public function getCompanyInvitations(Request $request)
+    {
+        try {
+            $request->validate([
+                'page_id' => 'required|integer|exists:pages,id',
+            ]);
+
+            $pageId = $request->page_id;
+
+            $memberships = PageMembership::where('user_page_id', $pageId)
+                ->whereColumn('page_id', 'is_member')
+                ->where('status', 'pending')
+                ->with([
+                    'page' => function ($query) {
+                        $query->select('id', 'page_profile_photo');
+                    }
+                ])
+                ->get();
+
+            if ($memberships->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No pending invitations found'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $memberships
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
+    public function approvedCompanyInvitations(Request $request)
+    {
+        try {
+            $request->validate([
+                'id' => 'required|integer|exists:company_membership,id',
+            ]);
+
+            $membership = PageMembership::findOrFail($request->id);
+            $membership->status = 'company_approved';
+            $membership->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Invitation approved successfully',
+                'data' => $membership
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function rejectCompanyInvitations(Request $request)
+    {
+        try {
+            $request->validate([
+                'id' => 'required|integer|exists:company_membership,id',
+            ]);
+
+            $membership = PageMembership::findOrFail($request->id);
+            $membership->status = 'rejected';
+            $membership->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Invitation rejected successfully',
+                'data' => $membership
+            ], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 
 
     public function getUserMemberships(Request $request)
