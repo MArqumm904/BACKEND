@@ -168,7 +168,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/getCompanyAffiliations', [App\Http\Controllers\UserMembershipController::class, 'getCompanyAffiliations']);
     Route::post('/getMembership/{id}', [App\Http\Controllers\UserMembershipController::class, 'getMembership']);
     Route::post('/updateMembership/{id}', [App\Http\Controllers\UserMembershipController::class, 'updateMembership']);
+    Route::get('/getAffiliationsCompanies', [App\Http\Controllers\UserMembershipController::class, 'getAffiliationsCompanies']);
+    Route::post('/requestCompanyAffiliations', [App\Http\Controllers\UserMembershipController::class, 'requestCompanyAffiliations']);
+    Route::post('/removeCompanyMembership', [App\Http\Controllers\UserMembershipController::class, 'removeCompanyMembership']);
+    Route::get('/checkverifiedMembershipbadge', [App\Http\Controllers\UserMembershipController::class, 'checkverifiedMembershipbadge']);
 });
+Route::get('/getUserMembershipsForAdmin', [App\Http\Controllers\UserMembershipController::class, 'getUserMembershipsForAdmin']);
+Route::get('/getCompanyMembershipsForAdmin', [App\Http\Controllers\UserMembershipController::class, 'getCompanyMembershipsForAdmin']);
+Route::post('/updateUserMembershipStatus', [App\Http\Controllers\UserMembershipController::class, 'updateUserMembershipStatus']);
+Route::post('/updateCompanyMembershipStatus', [App\Http\Controllers\UserMembershipController::class, 'updateCompanyMembershipStatus']);
 
 
 // ============================ FRIEND REQUEST API ================================

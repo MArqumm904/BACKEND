@@ -36,6 +36,11 @@ class PageMembership extends Model
         return $this->belongsTo(Page::class, 'page_id');
     }
 
+       public function pageaffiliation()
+    {
+        return $this->belongsTo(Page::class, 'user_page_id');
+    }
+
     public function user()
     {
         return $this->belongsTo(User::class, 'user_page_id');
