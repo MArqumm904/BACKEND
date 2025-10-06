@@ -5,12 +5,15 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Post;
 use App\Models\SavedPost;
+use App\Models\reelSave;
 use App\Models\Media;
+use App\Models\User;
 use App\Models\Comment;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Session;
 use App\Models\Like;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 
 class PostController extends Controller
@@ -116,7 +119,7 @@ class PostController extends Controller
             'content' => 'nullable|string|max:1000',
             'type' => 'required|string|in:text,image,video,poll',
             'visibility' => 'required|string|in:public,private,friends',
-            'video' => 'required_if:type,video|file|mimes:mp4,mov,avi,wmv,flv,webm|max:20480',
+            'video' => 'required_if:type,video|file|mimes:mp4,mov,avi,wmv,flv,webm',
         ]);
 
         if ($validator->fails()) {
@@ -292,6 +295,7 @@ class PostController extends Controller
 
         return response()->json($response);
     }
+
     public function getauthenticatedPosts(Request $request)
     {
         $currentUserId = $request->user_id;
@@ -380,9 +384,11 @@ class PostController extends Controller
         $comments = Comment::where('post_id', $postId)
             ->whereNull('parent_id')
             ->with([
-                    'user:id,name,email',
-                    'replies.user:id,name'
-                ])
+                'user:id,name,email', // user info
+                'user.profile:id,user_id,profile_photo', // profile_photo
+                'replies.user:id,name',
+                'replies.user.profile:id,user_id,profile_photo' // replies ke user ka profile
+            ])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -406,6 +412,7 @@ class PostController extends Controller
             'data' => $comments
         ]);
     }
+
 
     public function storereaction(Request $request)
     {
@@ -531,10 +538,10 @@ class PostController extends Controller
                 'success' => true,
                 'message' => "Comment {$action} successfully",
                 'data' => [
-                        'comment_id' => $commentId,
-                        'new_likes_count' => $comment->likes_count,
-                        'user_liked' => $action === 'liked',
-                    ]
+                    'comment_id' => $commentId,
+                    'new_likes_count' => $comment->likes_count,
+                    'user_liked' => $action === 'liked',
+                ]
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -585,9 +592,9 @@ class PostController extends Controller
                 'success' => true,
                 'message' => "Post {$action} successfully",
                 'data' => [
-                        'post_id' => $postId,
-                        'user_saved' => $action === 'saved'
-                    ]
+                    'post_id' => $postId,
+                    'user_saved' => $action === 'saved'
+                ]
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -608,7 +615,7 @@ class PostController extends Controller
     {
         $currentUserId = auth()->id();
 
-        // 1️⃣ Fetch saved_posts with post and saved_by_user relationships
+        // 1️⃣ Fetch saved posts
         $savedPosts = SavedPost::with([
             'post.user',    // post ka owner
             'post.media',   // post ka media
@@ -619,11 +626,24 @@ class PostController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        // 2️⃣ Prepare response
+        // 2️⃣ Fetch saved reels
+        $savedReels = reelSave::with([
+            'reel.user',    // reel ka owner
+            'user'          // jis user ne save kiya
+        ])
+            ->where('user_id', $currentUserId)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        // 3️⃣ Prepare response
         $response = [];
 
+        // 🔹 Saved Posts loop
         foreach ($savedPosts as $savedPost) {
             $post = $savedPost->post;
+            if (!$post) {
+                continue; // skip if no related post
+            }
 
             // Reactions
             $allReactions = Like::where('post_id', $post->id)
@@ -636,14 +656,15 @@ class PostController extends Controller
                 ->value('reaction_type');
 
             $response[] = [
+                'type' => 'post', // identify that this is a post
                 'saved_post' => [
                     'id' => $savedPost->id,
                     'saved_at' => $savedPost->created_at,
-                    'saved_by' => $savedPost->user, // jis user ne save kiya
+                    'saved_by' => $savedPost->user,
                 ],
                 'post' => [
                     'id' => $post->id,
-                    'user' => $post->user, // post ka owner
+                    'user' => $post->user,
                     'content' => $post->content,
                     'type' => $post->type,
                     'visibility' => $post->visibility,
@@ -659,8 +680,34 @@ class PostController extends Controller
             ];
         }
 
+        // 🔹 Saved Reels loop
+        foreach ($savedReels as $savedReel) {
+            $reel = $savedReel->reel;
+            if (!$reel) {
+                continue; // skip if no related reel
+            }
+
+            $response[] = [
+                'type' => 'reel', // identify that this is a reel
+                'saved_reel' => [
+                    'id' => $savedReel->id,
+                    'saved_at' => $savedReel->created_at,
+                    'saved_by' => $savedReel->user,
+                ],
+                'reel' => [
+                    'id' => $reel->id,
+                    'user' => $reel->user,
+                    'video_file' => $reel->video_file,
+                    'description' => $reel->description,
+                    'created_at' => $reel->created_at,
+                    'updated_at' => $reel->updated_at
+                ]
+            ];
+        }
+
         return response()->json($response);
     }
+
 
     public function show(Request $request, $postId)
     {
@@ -676,10 +723,10 @@ class PostController extends Controller
             'type' => $post->type,
             'created_at' => $post->created_at,
             'user' => [
-                    'id' => optional($post->user)->id,
-                    'name' => optional($post->user)->name,
-                    'profile_photo' => data_get($post, 'user.profile.profile_photo'),
-                ],
+                'id' => optional($post->user)->id,
+                'name' => optional($post->user)->name,
+                'profile_photo' => data_get($post, 'user.profile.profile_photo'),
+            ],
         ];
 
         if ($post->type === 'poll' && $post->poll) {
@@ -700,6 +747,274 @@ class PostController extends Controller
         }
 
         return response()->json(['data' => $base]);
+    }
+
+    public function shareapost(Request $request, $postId)
+    {
+        $currentUserId = auth()->id();
+
+        // Single post fetch with relationships
+        $post = Post::with(['user.profile', 'media', 'poll'])
+            ->find($postId);
+
+        if (!$post) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Post not found'
+            ], 404);
+        }
+
+        // Get comments count for this post
+        $commentsCount = Comment::where('post_id', $post->id)->count();
+
+        // Get all reactions for this post
+        $allReactions = Like::where('post_id', $post->id)
+            ->selectRaw('reaction_type, COUNT(*) as count')
+            ->groupBy('reaction_type')
+            ->pluck('count', 'reaction_type');
+
+        // Get current user's reaction
+        $userReaction = Like::where('post_id', $post->id)
+            ->where('user_id', $currentUserId)
+            ->value('reaction_type');
+
+        // Calculate total reactions
+        $totalReactions = $allReactions->sum();
+
+        // Get views count (if you have views table)
+        $viewsCount = 0; // Set to 0 if no views table
+
+        // Format user data with profile photo
+        $userData = [
+            'id' => $post->user->id,
+            'name' => $post->user->name,
+            'email' => $post->user->email,
+            'phone' => $post->user->phone,
+            'created_at' => $post->user->created_at,
+            'updated_at' => $post->user->updated_at,
+            'profile_photo' => $post->user->profile ? $post->user->profile->profile_photo : null,
+        ];
+
+        // Base post data
+        $postData = [
+            'id' => $post->id,
+            'user_id' => $post->user_id,
+            'page_id' => $post->page_id,
+            'group_id' => $post->group_id,
+            'content' => $post->content,
+            'type' => $post->type,
+            'visibility' => $post->visibility,
+            'created_at' => $post->created_at,
+            'updated_at' => $post->updated_at,
+            'user' => $userData,
+            'is_current_user' => $post->user_id === $currentUserId,
+            'reactions_count' => [
+                'like' => $allReactions['like'] ?? 0,
+                'love' => $allReactions['love'] ?? 0,
+                'haha' => $allReactions['haha'] ?? 0,
+                'wow' => $allReactions['wow'] ?? 0,
+                'sad' => $allReactions['sad'] ?? 0,
+                'angry' => $allReactions['angry'] ?? 0,
+                'care' => $allReactions['care'] ?? 0,
+            ],
+            'total_reactions' => $totalReactions,
+            'current_user_reaction' => $userReaction,
+            'comments' => $commentsCount,
+            'views' => $viewsCount,
+        ];
+
+        // Handle poll posts
+        if ($post->type === 'poll' && $post->poll) {
+            $postData['poll'] = [
+                'id' => $post->poll->id,
+                'question' => $post->poll->question,
+                'options' => json_decode($post->poll->options, true),
+                'created_at' => $post->poll->created_at,
+                'updated_at' => $post->poll->updated_at,
+            ];
+        }
+
+        // Handle media posts (image/video)
+        if (!$post->media->isEmpty()) {
+            $media = $post->media->first();
+            $postData['media'] = [
+                'id' => $media->id,
+                'type' => $media->type,
+                'file' => $media->file,
+            ];
+
+            // For frontend compatibility
+            if ($media->type === 'image') {
+                $postData['image'] = $media->file;
+            } elseif ($media->type === 'video') {
+                $postData['video'] = $media->file;
+                $postData['thumbnail'] = $media->thumbnail ?? null;
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $postData
+        ]);
+    }
+
+    public function shareapage($postId)
+    {
+        $currentUserId = auth()->id();
+
+        // Single post fetch with relationships
+        $post = Post::with(['media', 'poll'])
+            ->find($postId);
+
+        if (!$post) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Post not found'
+            ], 404);
+        }
+
+        // Check if this is a page post
+        if ($post->page_id) {
+            // Get page owner details
+            $page = \App\Models\Page::with('owner.profile')
+                ->find($post->page_id);
+
+            if (!$page || !$page->owner) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Page or page owner not found'
+                ], 404);
+            }
+
+            // Use page owner as the user
+            $user = $page->owner;
+            $userData = [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at,
+                'profile_photo' => $user->profile ? $user->profile->profile_photo : null,
+            ];
+
+            // Add page information
+            $pageData = [
+                'id' => $page->id,
+                'page_name' => $page->page_name,
+                'page_description' => $page->page_description,
+                'page_profile_photo' => $page->page_profile_photo,
+                'page_cover_photo' => $page->page_cover_photo,
+            ];
+        } else {
+            // Regular user post
+            $user = User::with('profile')->find($post->user_id);
+
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Post user not found'
+                ], 404);
+            }
+
+            $userData = [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'created_at' => $user->created_at,
+                'updated_at' => $user->updated_at,
+                'profile_photo' => $user->profile ? $user->profile->profile_photo : null,
+            ];
+
+            $pageData = null;
+        }
+
+        // Get comments count for this post
+        $commentsCount = Comment::where('post_id', $post->id)->count();
+
+        // Get all reactions for this post
+        $allReactions = Like::where('post_id', $post->id)
+            ->selectRaw('reaction_type, COUNT(*) as count')
+            ->groupBy('reaction_type')
+            ->pluck('count', 'reaction_type');
+
+        // Get current user's reaction
+        $userReaction = Like::where('post_id', $post->id)
+            ->where('user_id', $currentUserId)
+            ->value('reaction_type');
+
+        // Calculate total reactions
+        $totalReactions = $allReactions->sum();
+
+        // Get views count
+        $viewsCount = 0;
+
+        // Base post data
+        $postData = [
+            'id' => $post->id,
+            'user_id' => $post->user_id,
+            'page_id' => $post->page_id,
+            'group_id' => $post->group_id,
+            'content' => $post->content,
+            'type' => $post->type,
+            'visibility' => $post->visibility,
+            'created_at' => $post->created_at,
+            'updated_at' => $post->updated_at,
+            'user' => $userData,
+            'page' => $pageData, // Page information if it's a page post
+            'is_current_user' => ($post->page_id ? false : $post->user_id === $currentUserId),
+            'is_page_post' => !is_null($post->page_id),
+            'reactions_count' => [
+                'like' => $allReactions['like'] ?? 0,
+                'love' => $allReactions['love'] ?? 0,
+                'haha' => $allReactions['haha'] ?? 0,
+                'wow' => $allReactions['wow'] ?? 0,
+                'sad' => $allReactions['sad'] ?? 0,
+                'angry' => $allReactions['angry'] ?? 0,
+                'care' => $allReactions['care'] ?? 0,
+            ],
+            'total_reactions' => $totalReactions,
+            'current_user_reaction' => $userReaction,
+            'comments' => $commentsCount,
+            'views' => $viewsCount,
+        ];
+
+        // Handle poll posts
+        if ($post->type === 'poll' && $post->poll) {
+            $postData['poll'] = [
+                'id' => $post->poll->id,
+                'question' => $post->poll->question,
+                'options' => json_decode($post->poll->options, true),
+                'created_at' => $post->poll->created_at,
+                'updated_at' => $post->poll->updated_at,
+            ];
+        }
+
+        // Handle media posts
+        if ($post->media && !$post->media->isEmpty()) {
+            $postData['media'] = $post->media->map(function ($media) {
+                return [
+                    'id' => $media->id,
+                    'type' => $media->type,
+                    'file' => $media->file,
+                    'thumbnail' => $media->thumbnail ?? null,
+                ];
+            });
+
+            $firstMedia = $post->media->first();
+            if ($firstMedia->type === 'image') {
+                $postData['image'] = $firstMedia->file;
+            } elseif ($firstMedia->type === 'video') {
+                $postData['video'] = $firstMedia->file;
+                $postData['thumbnail'] = $firstMedia->thumbnail ?? null;
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $postData
+        ]);
     }
 
     public function deletePost(Request $request, $postId)
@@ -726,7 +1041,6 @@ class PostController extends Controller
                 'success' => true,
                 'message' => 'Post deleted successfully'
             ]);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'success' => false,
@@ -766,6 +1080,6 @@ class PostController extends Controller
             $post->poll->delete();
         }
 
-        \DB::table('saved_posts')->where('post_id', $post->id)->delete();
+        DB::table('saved_posts')->where('post_id', $post->id)->delete();
     }
 }

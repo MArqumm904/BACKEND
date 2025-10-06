@@ -7,6 +7,8 @@ use App\Models\Poll;
 use App\Models\Post;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Models\Page;
+use App\Models\Group;
 use App\Models\Profile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -24,12 +26,25 @@ class UserProfileController extends Controller
             return response()->json(['message' => 'User not found'], 404);
         }
 
+        // Fetch the latest page where owner_id matches this user's ID
+        $latestPage = Page::where('owner_id', $user_id)
+            ->latest()
+            ->first();
+
+        // Fetch the latest group where owner_id matches this user's ID
+        $latestGroup = Group::where('group_created_by', $user_id)
+            ->latest()
+            ->first();
+
         return response()->json([
             'user' => $user,
             'profile' => $user->profile,
-            'posts_count' => $user->posts_count
+            'posts_count' => $user->posts_count,
+            'latest_page' => $latestPage,
+            'latest_group' => $latestGroup
         ]);
     }
+
 
     public function updateProfile(Request $request, $user_id)
     {
@@ -248,13 +263,13 @@ class UserProfileController extends Controller
             ], 422);
         }
 
-        $profile = Profile::where('user_id' ,$request->profile_id)->first();
+        $profile = Profile::where('user_id', $request->profile_id)->first();
 
         if (!$profile || $profile->user_id !== auth()->id()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized to post on this profile',
-                'profile'=> $profile->user_id,
+                'profile' => $profile->user_id,
                 'auth_id' => auth()->id()
             ], 403);
         }
@@ -294,7 +309,7 @@ class UserProfileController extends Controller
             ], 422);
         }
 
-        $profile = Profile::where('user_id',$request->profile_id)->first();
+        $profile = Profile::where('user_id', $request->profile_id)->first();
 
         if (!$profile || $profile->user_id !== auth()->id()) {
             return response()->json([
@@ -353,7 +368,7 @@ class UserProfileController extends Controller
             ], 422);
         }
 
-        $profile = Profile::where('user_id' , $request->profile_id)->first();
+        $profile = Profile::where('user_id', $request->profile_id)->first();
 
         if (!$profile || $profile->user_id !== auth()->id()) {
             return response()->json([
@@ -411,7 +426,7 @@ class UserProfileController extends Controller
             ], 422);
         }
 
-        $profile = Profile::where('user_id',$request->profile_id)->first();
+        $profile = Profile::where('user_id', $request->profile_id)->first();
 
         if (!$profile || $profile->user_id !== auth()->id()) {
             return response()->json([

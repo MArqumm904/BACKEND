@@ -36,4 +36,8 @@ class SavedPost extends Model
     {
         return $this->hasOne(Poll::class);
     }
+    public function reel()
+    {
+        return $this->belongsTo(Reel::class);
+    }
 }

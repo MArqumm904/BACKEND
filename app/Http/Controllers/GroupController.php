@@ -77,6 +77,7 @@ class GroupController extends Controller
             'data' => $group
         ]);
     }
+    
     public function showall()
     {
         // Current authenticated user ki ID get karenge

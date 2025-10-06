@@ -121,6 +121,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/getreelscomments', [App\Http\Controllers\Reels::class, 'reelscomments']);
     Route::post('/storereelcommentreply', [App\Http\Controllers\Reels::class, 'storereelcommentreply']);
     Route::post('/storereelreply', [App\Http\Controllers\Reels::class, 'storereelreply']);
+    Route::post('/unsavedreel', [App\Http\Controllers\Reels::class, 'unsavedreel']);
 });
 
 
@@ -135,6 +136,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/imageposts', [App\Http\Controllers\PostController::class, 'storeimage']);
     Route::post('/videoposts', [App\Http\Controllers\PostController::class, 'storevideo']);
     Route::get('/posts/{id}', [App\Http\Controllers\PostController::class, 'show']);
+    Route::get('/shareapost/{id}', [App\Http\Controllers\PostController::class, 'shareapost']);
+    Route::get('/shareapage/{id}', [App\Http\Controllers\PostController::class, 'shareapage']);
     // ========================== POST POLL API's ==============================================
     Route::post('/pollposts', [App\Http\Controllers\PollController::class, 'storepoll']);
     Route::post('/postsreactions', [App\Http\Controllers\PostController::class, 'storereaction']);

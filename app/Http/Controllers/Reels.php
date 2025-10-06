@@ -16,7 +16,7 @@ class Reels extends Controller
         $request->validate([
             'description' => 'nullable|string',
             'tags' => 'nullable|array',
-            'video' => 'required|file|mimes:mp4,mov,avi,wmv|max:20000', // max 20MB
+            'video' => 'required|file|mimes:mp4,mov,avi,wmv', // max 20MB
             'thumbnail' => 'image|mimes:jpg,jpeg,png|max:5000', // max 5MB
             'visibility' => 'required|string|in:public,private',
         ]);
@@ -296,5 +296,57 @@ class Reels extends Controller
             'message' => 'Reel reply added successfully',
             'data' => $reply
         ]);
+    }
+    public function unsavedreel(Request $request)
+    {
+        try {
+            // Validation
+            $request->validate([
+                'reel_id' => 'required|integer'
+            ]);
+
+            $userId = auth()->id();
+            $reelId = $request->reel_id;
+
+            // Check if already saved
+            $savedReel = reelSave::where('user_id', $userId)
+                ->where('reel_id', $reelId)
+                ->first();
+
+            if ($savedReel) {
+                // If exists → delete
+                $savedReel->delete();
+                $action = 'unsaved';
+            } else {
+                // If not exists → create
+                reelSave::create([
+                    'user_id' => $userId,
+                    'reel_id' => $reelId,
+                    'created_at' => now(),
+                ]);
+                $action = 'saved';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Reel {$action} successfully",
+                'data' => [
+                    'reel_id' => $reelId,
+                    'user_saved' => $action === 'saved'
+                ]
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }
