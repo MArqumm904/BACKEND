@@ -118,7 +118,7 @@ class MessageController extends Controller
     public function sendFileMessage(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'file' => 'required|file|max:20480',
+            'file' => 'required|file',
             'caption' => 'nullable|string|max:1000',
             'receiver_id' => 'required|integer|exists:users,id'
         ]);

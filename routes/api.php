@@ -92,6 +92,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // =================================== GET ALL GROUP ===================================
     Route::get('/groups', [App\Http\Controllers\GroupController::class, 'showall']);
     Route::delete('/groups/{groupid}', [App\Http\Controllers\GroupController::class, 'deleteGroupFields']);
+    // =================================== GET ALL GROUPs THAT USER JOINED ===================================
+    // Route to list groups the authenticated user is a member of
+    Route::get('/joinedgrous', [App\Http\Controllers\GroupMemberController::class, 'FetchJoinedGroups']);
 });
 
 // ============================ PAGES API ================================

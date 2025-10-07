@@ -77,14 +77,14 @@ class GroupController extends Controller
             'data' => $group
         ]);
     }
-    
+
     public function showall()
     {
-        // Current authenticated user ki ID get karenge
         $userId = auth()->id();
 
-        // Groups retrieve karenge jo current user ne create kiye hain
+        // Retrieve groups with creator and members count
         $groups = Group::with('creator')
+            ->withCount('members') // <--- This line adds member count
             ->where('group_created_by', $userId)
             ->latest()
             ->get();
@@ -99,6 +99,7 @@ class GroupController extends Controller
             'total' => $groups->count()
         ]);
     }
+
 
     /**
      * Update the specified resource in storage.
@@ -275,7 +276,6 @@ class GroupController extends Controller
                 'success' => true,
                 'media' => $media
             ]);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
