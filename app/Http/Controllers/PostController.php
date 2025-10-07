@@ -304,14 +304,36 @@ class PostController extends Controller
         $fetchedPostIds = $request->input('already_fetched_ids', []);
         $debugMessages[] = 'Fetched from request: ' . json_encode($fetchedPostIds);
 
-        $postsToReturn = Post::with(['user.profile', 'media'])
-            ->where('user_id', $currentUserId) // Only current user's posts
+        // Fetch posts (only current user's posts)
+        $postsToReturn = Post::with(['user.profile', 'media', 'poll'])
+            ->where('user_id', $currentUserId)
             ->whereNotIn('id', $fetchedPostIds)
             ->inRandomOrder()
             ->take(3)
             ->get();
 
         $debugMessages[] = 'Posts returned: ' . $postsToReturn->count();
+
+        // 🔹 Get all post IDs
+        $postIds = $postsToReturn->pluck('id');
+
+        // 🔹 Count comments
+        $commentsCount = Comment::whereIn('post_id', $postIds)
+            ->selectRaw('post_id, COUNT(*) as count')
+            ->groupBy('post_id')
+            ->pluck('count', 'post_id');
+
+        // 🔹 Get reactions grouped by post and reaction type
+        $allReactions = Like::whereIn('post_id', $postIds)
+            ->selectRaw('post_id, reaction_type, COUNT(*) as count')
+            ->groupBy('post_id', 'reaction_type')
+            ->get()
+            ->groupBy('post_id');
+
+        // 🔹 Get the current user's reaction to each post
+        $userReactions = Like::whereIn('post_id', $postIds)
+            ->where('user_id', $currentUserId)
+            ->pluck('reaction_type', 'post_id');
 
         $response = [
             'text_posts' => [],
@@ -323,6 +345,26 @@ class PostController extends Controller
         ];
 
         foreach ($postsToReturn as $post) {
+            // 🔹 Reaction data
+            $reactionData = isset($allReactions[$post->id]) ? $allReactions[$post->id] : collect();
+            $reactionsCount = $reactionData->pluck('count', 'reaction_type');
+            $totalReactions = $reactionsCount->sum();
+            $userReaction = $userReactions[$post->id] ?? null;
+
+            // 🔹 Comment count
+            $postCommentsCount = $commentsCount[$post->id] ?? 0;
+
+            // 🔹 User data with profile photo
+            $userData = [
+                'id' => $post->user->id,
+                'name' => $post->user->name,
+                'email' => $post->user->email,
+                'phone' => $post->user->phone,
+                'created_at' => $post->user->created_at,
+                'updated_at' => $post->user->updated_at,
+                'profile_photo' => $post->user->profile ? $post->user->profile->profile_photo : null,
+            ];
+
             $postData = [
                 'id' => $post->id,
                 'user_id' => $post->user_id,
@@ -332,7 +374,14 @@ class PostController extends Controller
                 'visibility' => $post->visibility,
                 'created_at' => $post->created_at,
                 'updated_at' => $post->updated_at,
-                'user' => $post->user,
+                'user' => $userData,
+                'is_current_user' => $post->user_id === $currentUserId,
+
+                // ✅ Added fields
+                'reactions_count' => $reactionsCount,
+                'total_reactions' => $totalReactions,
+                'current_user_reaction' => $userReaction,
+                'comments_count' => $postCommentsCount
             ];
 
             $response['fetched_ids'][] = $post->id;
@@ -347,7 +396,7 @@ class PostController extends Controller
                     'updated_at' => $post->poll->updated_at,
                 ];
                 $response['poll_posts'][] = $pollData;
-            } else if ($post->media->isEmpty()) {
+            } elseif ($post->media->isEmpty()) {
                 $response['text_posts'][] = $postData;
             } else {
                 foreach ($post->media as $media) {
@@ -369,6 +418,7 @@ class PostController extends Controller
 
         return response()->json($response);
     }
+
 
     public function getcomments(Request $request)
     {
